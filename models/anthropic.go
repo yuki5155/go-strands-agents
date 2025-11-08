@@ -1,7 +1,11 @@
 package models
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/anthropics/anthropic-sdk-go"
+	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/yuki5155/go-strands-agents/utils"
 )
 
@@ -113,4 +117,82 @@ func (r *StreamingResponse) ProcessEvent(event anthropic.MessageStreamEventUnion
 		r.CacheReadInputTokens = messageDelta.Usage.CacheReadInputTokens
 	}
 	return ""
+}
+
+// create client struct for anthropic
+type AnthropicClient struct {
+	Client anthropic.Client
+	Config *AnthropicConfig
+}
+
+func NewAnthropicClient(options ...Option) *AnthropicClient {
+	// Create config with provided options
+	config := NewAnthropicConfig(options...)
+
+	// If ApiKey is still empty, try to get it from env
+	if config.ApiKey == "" {
+		key, ok := utils.GetApiKeyFromEnv()
+		if !ok {
+			panic("ANTHROPIC_API_KEY is not set")
+		}
+		config.ApiKey = key
+	}
+
+	return &AnthropicClient{
+		Client: anthropic.NewClient(
+			option.WithAPIKey(config.ApiKey),
+		),
+		Config: config,
+	}
+}
+
+// StreamMessages sends messages and streams the response with optional callback for each text delta
+func (c *AnthropicClient) StreamMessages(ctx context.Context, messages []anthropic.MessageParam, onDelta func(string)) (*StreamingResponse, error) {
+	stream := c.Client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
+		MaxTokens: c.Config.MaxTokens,
+		Messages:  messages,
+		Model:     anthropic.Model(c.Config.ModelId),
+	})
+	defer stream.Close()
+
+	response := NewStreamingResponse(c.Config.ModelId)
+
+	for stream.Next() {
+		event := stream.Current()
+		delta := response.ProcessEvent(event)
+		if delta != "" && onDelta != nil {
+			onDelta(delta)
+		}
+	}
+
+	if err := stream.Err(); err != nil {
+		return nil, err
+	}
+
+	return response, nil
+}
+
+// StreamSimpleMessage is a convenience method for sending a single text message
+func (c *AnthropicClient) StreamSimpleMessage(ctx context.Context, text string, printToConsole bool) (*StreamingResponse, error) {
+	messages := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock(text)),
+	}
+
+	var onDelta func(string)
+	if printToConsole {
+		onDelta = func(delta string) {
+			fmt.Print(delta)
+		}
+	}
+
+	response, err := c.StreamMessages(ctx, messages, onDelta)
+	if err != nil {
+		return nil, err
+	}
+
+	if printToConsole {
+		fmt.Println() // newline at the end
+	}
+
+	return response, nil
 }

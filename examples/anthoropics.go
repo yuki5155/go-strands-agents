@@ -110,3 +110,46 @@ func simpleStreamCallWithSchema(config *models.AnthropicConfig) *models.Streamin
 
 	return response
 }
+
+// Example using the new AnthropicClient struct - Simplest usage with defaults
+func streamingWithClient() *models.StreamingResponse {
+	// Create client with defaults (uses env var for API key, default model and max tokens)
+	client := models.NewAnthropicClient()
+
+	// Simple streaming call with console output
+	response, err := client.StreamSimpleMessage(
+		context.TODO(),
+		"What is a quaternion?",
+		true, // print to console
+	)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	return response
+}
+
+// Example with custom options
+func streamingWithClientCustom() *models.StreamingResponse {
+	// Create client with custom options
+	client := models.NewAnthropicClient(
+		models.WithMaxTokens(2048),
+		models.WithModelId("claude-sonnet-4-5-20250929"),
+	)
+
+	// Stream with custom message and custom delta handler
+	messages := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock("Explain quantum entanglement in simple terms.")),
+	}
+
+	response, err := client.StreamMessages(context.TODO(), messages, func(delta string) {
+		// Custom handling of each text delta
+		fmt.Print(delta)
+	})
+	if err != nil {
+		panic(err.Error())
+	}
+	fmt.Println()
+
+	return response
+}
