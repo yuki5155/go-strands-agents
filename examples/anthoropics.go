@@ -144,7 +144,7 @@ func streamingWithClientCustom() *models.StreamingResponse {
 
 	response, err := client.StreamMessages(context.TODO(), messages, func(delta string) {
 		// Custom handling of each text delta
-		fmt.Print(delta)
+		//fmt.Print(delta)
 	})
 	if err != nil {
 		panic(err.Error())

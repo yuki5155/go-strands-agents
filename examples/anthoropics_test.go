@@ -97,6 +97,9 @@ func TestStreamingWithClientCustom(t *testing.T) {
 		t.Skip("Skipping test: ANTHROPIC_API_KEY is not set")
 	}
 	response := streamingWithClientCustom()
+	for delta := range response.GetChannel() {
+		fmt.Print(delta)
+	}
 
 	fmt.Printf("\n--------------------------------\n")
 	fmt.Printf("Message ID: %s\n", response.MessageID)

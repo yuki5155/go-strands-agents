@@ -2,7 +2,6 @@ package models
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -75,13 +74,20 @@ type StreamingResponse struct {
 	OutputTokens             int64
 	CacheCreationInputTokens int64
 	CacheReadInputTokens     int64
+	Channel                  chan string
 }
 
 // NewStreamingResponse creates a new StreamingResponse with the given model
 func NewStreamingResponse(model string) *StreamingResponse {
 	return &StreamingResponse{
-		Model: model,
+		Model:   model,
+		Channel: make(chan string),
 	}
+}
+
+// GetChannel returns the channel for streaming text deltas
+func (r *StreamingResponse) GetChannel() chan string {
+	return r.Channel
 }
 
 // ProcessEvent processes a streaming event and updates the response accordingly
@@ -100,11 +106,17 @@ func (r *StreamingResponse) ProcessEvent(event anthropic.MessageStreamEventUnion
 		// Check if content block has initial text
 		if blockStart.ContentBlock.Text != "" {
 			r.Content += blockStart.ContentBlock.Text
+			if r.Channel != nil {
+				r.Channel <- blockStart.ContentBlock.Text
+			}
 			return blockStart.ContentBlock.Text
 		}
 	case "content_block_delta":
 		delta := event.AsContentBlockDelta()
 		r.Content += delta.Delta.Text
+		if r.Channel != nil {
+			r.Channel <- delta.Delta.Text
+		}
 		return delta.Delta.Text
 	case "message_delta":
 		messageDelta := event.AsMessageDelta()
@@ -148,26 +160,26 @@ func NewAnthropicClient(options ...Option) *AnthropicClient {
 
 // StreamMessages sends messages and streams the response with optional callback for each text delta
 func (c *AnthropicClient) StreamMessages(ctx context.Context, messages []anthropic.MessageParam, onDelta func(string)) (*StreamingResponse, error) {
-	stream := c.Client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
-		MaxTokens: c.Config.MaxTokens,
-		Messages:  messages,
-		Model:     anthropic.Model(c.Config.ModelId),
-	})
-	defer stream.Close()
-
 	response := NewStreamingResponse(c.Config.ModelId)
 
-	for stream.Next() {
-		event := stream.Current()
-		delta := response.ProcessEvent(event)
-		if delta != "" && onDelta != nil {
-			onDelta(delta)
-		}
-	}
+	go func() {
+		defer close(response.Channel)
 
-	if err := stream.Err(); err != nil {
-		return nil, err
-	}
+		stream := c.Client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
+			MaxTokens: c.Config.MaxTokens,
+			Messages:  messages,
+			Model:     anthropic.Model(c.Config.ModelId),
+		})
+		defer stream.Close()
+
+		for stream.Next() {
+			event := stream.Current()
+			delta := response.ProcessEvent(event)
+			if delta != "" && onDelta != nil {
+				onDelta(delta)
+			}
+		}
+	}()
 
 	return response, nil
 }
@@ -181,7 +193,7 @@ func (c *AnthropicClient) StreamSimpleMessage(ctx context.Context, text string, 
 	var onDelta func(string)
 	if printToConsole {
 		onDelta = func(delta string) {
-			fmt.Print(delta)
+			//fmt.Print(delta)
 		}
 	}
 
@@ -191,7 +203,7 @@ func (c *AnthropicClient) StreamSimpleMessage(ctx context.Context, text string, 
 	}
 
 	if printToConsole {
-		fmt.Println() // newline at the end
+		// fmt.Println() // newline at the end
 	}
 
 	return response, nil
